@@ -4,7 +4,7 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
-#include <unordered_map>
+#include <functional>
 
 #include <list>
 #include <vector>
@@ -227,6 +227,7 @@ template<typename T, typename FromString = ConfigCast<std::string, T>, typename 
 class ConfigVar: public ConfigVarBase{
 public:
     using ptr_t = std::shared_ptr<ConfigVar>;
+    using onChangeCallback = std::function<void(const T& old_value, const T& new_value)>;
 
     ConfigVar(const std::string& key, const T& value, const std::string& desc = ""):ConfigVarBase(key, desc),value_(value){}
 
@@ -253,12 +254,40 @@ public:
     }
 
     const T& getValue() const{return value_;}
-    void setValue(const T& value){value_ = value;}
+    void setValue(const T& value){
+        if(value == value_){
+            return;
+        }
+        for(auto it = callbacks_.begin(); it != callbacks_.end(); it++){
+            (it->second)(value_, value);
+        }
+        value_ = value;
+    }
 
     const char* getTypeInfo() const override{return typeid(T).name();}
 
+    void addListener(const std::string& key, const onChangeCallback& cb){
+        callbacks_.insert_or_assign(key, cb);
+    }
+
+    void delListener(const std::string& key){
+        callbacks_.erase(key);
+    }
+
+    void getListener(const std::string& key){
+        auto it = callbacks_.find(key);
+        return it == callbacks_.end() ? onChangeCallback() : it->second;
+    }
+
+    void clearAllListeners(){
+        callbacks_.clear();
+    }
+
 private:
     T value_;
+
+    // 变更事件回调函数集合
+    std::unordered_map<std::string, onChangeCallback> callbacks_;
 };
 
 
