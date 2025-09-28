@@ -6,8 +6,17 @@
 
 namespace sylar{
 
+class noncopyable{
+public:
+    noncopyable() = default;
+    noncopyable(const noncopyable&) = delete;
+    noncopyable(noncopyable&&) = delete;
+    noncopyable& operator=(const noncopyable&) = delete;
+};
+
+
 size_t getFiberId();
-uint32_t getThreadId();
+pid_t getThreadId();
 
 }
 

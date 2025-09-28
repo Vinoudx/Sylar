@@ -18,3 +18,6 @@ ConfigVar: 配置项类，与基类配合实现类型擦除
 ConfigCast: 模板类及其偏特化，实现 基础类型, vector, list, set, unordered_set, map, unordered_map 的FromString和ToString功能
 Config类: 配置类，提供lookup的两种重载和loadFromFile函数，其中lookup单参数版本在未查找到时返回nullptr，三参数版本在未查找到时根据defaultVal创建项，查找到则根据defaultVal进行覆盖，loadFromFile只会覆盖已存在值不会创建
 ConfigVar::addListener: 给对应配置项的变更事件添加回调函数
+
+## 线程
+核心基于协程，协程在线程上跑
