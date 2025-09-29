@@ -12,11 +12,13 @@
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <mutex>
 
 #include <boost/lexical_cast.hpp>
 #include <yaml-cpp/yaml.h>
 
 #include "logger.hpp"
+#include "thread.hpp"
 
 namespace sylar{
 
@@ -33,6 +35,9 @@ public:
     const std::string& getDesc() const{return desc_;}
 
     virtual const char* getTypeInfo() const = 0;
+
+protected:
+    std::shared_mutex mtx_;    
 
 private:
     std::string key_;
@@ -231,8 +236,10 @@ public:
 
     ConfigVar(const std::string& key, const T& value, const std::string& desc = ""):ConfigVarBase(key, desc),value_(value){}
 
-    // todo 将tostring和fromstring适配 基本类型，string，vector, list，map，set，unordered_map，unordered_set，自定义类
+    // 将tostring和fromstring适配 基本类型，string，vector, list，map，set，unordered_map，unordered_set，自定义类
+    // string是配置项从文件到内存的中间桥梁，读取配置项后先读成string，再从string转成配置项，从而对配置树的每个层级都有相应配置项
     std::string toString() override {
+        std::shared_lock<std::shared_mutex> l(mtx_);
         try{
             // return boost::lexical_cast<std::string>(value_);
             return ToString()(value_);
@@ -245,7 +252,7 @@ public:
     bool fromString(const std::string& str) override {
         try{    
             // value_ = boost::lexical_cast<T>(str);
-            value_ = FromString()(str);
+            setValue(FromString()(str));
             return true;
         }catch(std::exception& e){
             SYLAR_LOG_ERROR << "ConfigVar::fromString, " << e.what() << " converting std::string to " << typeid(T).name();
@@ -253,33 +260,44 @@ public:
         return false;
     }
 
-    const T& getValue() const{return value_;}
+    const T& getValue() const{
+        std::shared_lock<std::shared_mutex> l(mtx_);
+        return value_;
+    }
     void setValue(const T& value){
+        {
+        std::shared_lock<std::shared_mutex> l(mtx_);
         if(value == value_){
             return;
         }
         for(auto it = callbacks_.begin(); it != callbacks_.end(); it++){
             (it->second)(value_, value);
         }
+        }
+        std::unique_lock<std::shared_mutex> l(mtx_);
         value_ = value;
     }
 
     const char* getTypeInfo() const override{return typeid(T).name();}
 
     void addListener(const std::string& key, const onChangeCallback& cb){
+        std::unique_lock<std::shared_mutex> l(mtx_);
         callbacks_.insert_or_assign(key, cb);
     }
 
     void delListener(const std::string& key){
+        std::unique_lock<std::shared_mutex> l(mtx_);
         callbacks_.erase(key);
     }
 
     void getListener(const std::string& key){
+        std::shared_lock<std::shared_mutex> l(mtx_);
         auto it = callbacks_.find(key);
         return it == callbacks_.end() ? onChangeCallback() : it->second;
     }
 
     void clearAllListeners(){
+        std::unique_lock<std::shared_mutex> l(mtx_);
         callbacks_.clear();
     }
 
@@ -299,6 +317,7 @@ public:
     // 查找，若不存在则返回nullptr
     template<typename T>
     static ConfigVar<T>::ptr_t lookup(const std::string& key){
+        std::shared_lock<std::shared_mutex> l(mtx_);
         auto it = map_.find(key);
         if(it == map_.end()){
             SYLAR_LOG_INFO << "Config::lookup, cannot find config item with key = " << key;
@@ -316,18 +335,26 @@ public:
     // 查找，若不存在则插入
     template<typename T>
     static ConfigVar<T>::ptr_t lookup(const std::string& key, const T& defaultVal, const std::string& desc = ""){
-        auto ptr = lookup<T>(key);
-        auto it = map_.find(key);
+        typename ConfigVar<T>::ptr_t ptr; 
+        ptr = lookup<T>(key);
+        {
+        std::shared_lock<std::shared_mutex> l(mtx_);         
+        auto it = map_.find(key); 
         // 找到且类型出错
         if(ptr == nullptr && it != map_.end()){
             return nullptr;
         }
+        }  
+
+    
         // 找到且类型正确
         if(ptr != nullptr){
             ptr->setValue(defaultVal);
             return ptr;
         }
         // 没找到
+        {
+        std::unique_lock<std::shared_mutex> l(mtx_);        
         if(key.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ._1234567890") != std::string::npos){
             SYLAR_LOG_ERROR << "Config::lookup, invalid key"; 
             return nullptr;
@@ -336,13 +363,13 @@ public:
         map_.insert_or_assign(key, item);
         SYLAR_LOG_INFO << "Config::lookup, inserting config item with key = " << key << " and value = " << item->toString();
         return std::dynamic_pointer_cast<ConfigVar<T>>(item);
+        }
     }
 
-    static void listAllMember(const std::string& prefix, const YAML::Node& node, std::list<std::pair<std::string, YAML::Node>>& members);
 
     static void loadFromFile(const std::string& path);
 
-    static ConfigVarBase::ptr_t lookUpBase(const std::string& key);
+
 
     static void showAllMembers(){
         for(auto it = map_.begin(); it != map_.end(); it++){
@@ -351,7 +378,12 @@ public:
     }
 
 private:
+    static void listAllMember(const std::string& prefix, const YAML::Node& node, std::list<std::pair<std::string, YAML::Node>>& members);
+    static ConfigVarBase::ptr_t lookUpBase(const std::string& key);
+
+private:
     static ConfigMap map_;
+    static std::shared_mutex mtx_;
 };
 
 }

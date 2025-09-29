@@ -55,78 +55,31 @@ private:
     Semaphore sem_;
 };
 
-static thread_local std::unique_ptr<std::shared_lock<std::shared_mutex>> rdl = nullptr;
-static thread_local std::unique_ptr<std::unique_lock<std::shared_mutex>> wrl = nullptr;
-
-// 读写锁
-class RWLock: public noncopyable{
+class RWLock : public noncopyable {
 public:
     RWLock() = default;
     ~RWLock() = default;
 
-    void rdlock(){
-        if(rdl != nullptr){
-            SYLAR_LOG_WARNING << "RWLock, cannot relock read lock";
-        }else if(rdl == nullptr && wrl == nullptr){
-            rdl = std::make_unique<std::shared_lock<std::shared_mutex>>(smtx_);
-            // 持有写锁，将锁降级为读锁
-            if(wrl != nullptr){
-                wrl.reset(nullptr);
-            }          
-        }
-    }
-
-    void wrlock(){
-        if(wrl != nullptr){
-            SYLAR_LOG_WARNING << "RWLock, cannot relock write lock";
-        }
-        if(rdl != nullptr){
-            SYLAR_LOG_WARNING << "RWLock, cannot aquire write lock while holding read lock";
-        }
-        if(rdl == nullptr && wrl == nullptr){
-            wrl = std::make_unique<std::unique_lock<std::shared_mutex>>(smtx_);
-        }
-    }
-
-    void unlock(){
-        if(rdl != nullptr){
-            rdl.reset(nullptr);
-        }
-        if(wrl != nullptr){
-            wrl.reset(nullptr);
-        }
-    }
+    std::shared_mutex& get_mutex() { return smtx_; }
 
 private:
     std::shared_mutex smtx_;
 };
 
-// 读写锁guard
-class RWLockGuard: public noncopyable{
+class ReadLockGuard {
 public:
-    RWLockGuard(RWLock& lock):lock_(lock){}
-    ~RWLockGuard(){lock_.unlock();}
-    void rdlock(){lock_.rdlock();}
-    void wrlock(){lock_.wrlock();}
-    void unlock(){lock_.unlock();}
+    ReadLockGuard(RWLock& lock) : lock_(lock), guard_(lock_.get_mutex()) {}
 private:
     RWLock& lock_;
+    std::shared_lock<std::shared_mutex> guard_;
 };
 
-// 读锁guard
-class ReadLockGuard: public RWLockGuard{
+class WriteLockGuard {
 public:
-    ReadLockGuard(RWLock& lock):RWLockGuard(lock){RWLockGuard::rdlock();}
-    void lock(){RWLockGuard::rdlock();}
-    void unlock(){RWLockGuard::unlock();}
-};
-
-// 写锁guard
-class WriteLockGuard: public RWLockGuard{
-public:
-    WriteLockGuard(RWLock& lock):RWLockGuard(lock){RWLockGuard::wrlock();}
-    void lock(){RWLockGuard::wrlock();}
-    void unlock(){RWLockGuard::unlock();}  
+    WriteLockGuard(RWLock& lock) : lock_(lock), guard_(lock_.get_mutex()) {}
+private:
+    RWLock& lock_;
+    std::unique_lock<std::shared_mutex> guard_;
 };
 
 }

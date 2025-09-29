@@ -3,6 +3,7 @@
 namespace sylar{
 
 Config::ConfigMap Config::map_;
+std::shared_mutex Config::mtx_;
 
 ConfigVarBase::ptr_t Config::lookUpBase(const std::string& key){
     auto it = map_.find(key);
@@ -29,6 +30,7 @@ void Config::listAllMember(const std::string& prefix, const YAML::Node& node, st
 }
 
 void Config::loadFromFile(const std::string& path){
+    std::unique_lock<std::shared_mutex> l(mtx_);
     std::list<std::pair<std::string, YAML::Node>> members;    
     try{
         YAML::Node node = YAML::LoadFile(path);

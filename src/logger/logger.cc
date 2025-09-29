@@ -107,10 +107,10 @@ namespace sylar{
 
     std::string LogFormatter::format(LogLevel level, const LogEvent::ptr_t& event){
         char temp[1024] = {0};
-        snprintf(temp, 1023, "%s:%u %s %-8s %5u %5u: %s\n",
+        snprintf(temp, 1023, "%s %s:%u %-8s %5u %5u: %s\n",
+            event->getTime().c_str(),            
             event->getFile().c_str(),            
             event->getLine(),
-            event->getTime().c_str(),
             levelToString(level),
             event->getThreadId(),
             event->getFiberId(),
